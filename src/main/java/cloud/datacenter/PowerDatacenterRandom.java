@@ -204,10 +204,10 @@ public class PowerDatacenterRandom extends PowerDatacenter {
                 double prevUtilization = powerHost.getPreviousUtilizationOfCpu();
                 double currentUtilization = powerHost.getUtilizationOfCpu();
                 double energyConsumed = powerHost.getEnergyLinearInterpolation(prevUtilization, currentUtilization, timeDiff);
-                Log.formatLine("[Host #%d]: Energy requirement: %.2f W (Utilization: %.2f)",
+                Log.formatLine("[Host #%d]: Energy requirement: %.2f W.sec (Utilization: %.2f)",
                         powerHost.getId(), energyConsumed, currentUtilization);
                 if (this.getGreenPower() >= energyConsumed) {
-                    Log.formatLine("%.2f: [Datacenter #%d] [Host #%d] Used GREEN energy: %.2f W (Remaining Green Energy: %.2f W)",
+                    Log.formatLine("%.2f: [Datacenter #%d] [Host #%d] Used GREEN energy: %.2f W (Remaining Green Energy: %.2f W.sec)",
                             currentTime, powerHost.getDatacenter().getId(), powerHost.getId(), energyConsumed, this.getGreenPower());
                     this.setGreenPower(this.getGreenPower() - energyConsumed);
                 } else {

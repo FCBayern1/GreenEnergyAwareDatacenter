@@ -34,12 +34,14 @@ public class Constants {
     public static final int[] VM_MIPS = new int[]{3500, 3000, 2500, 2000, 1500};
     public static final int[] VM_PES = new int[]{1, 1, 1, 1, 1};
     public static final int[] VM_RAM = new int[]{2048, 2048, 1024, 1024, 512};
-    public static final int[] HOST_MIPS = new int[]{300, 1800, 5400};
-    public static final int[] HOST_PES = new int[]{1, 1, 1};
+    public static final int[] HOST_MIPS = new int[]{6000, 8000, 10000};
+    public static final int[] HOST_PES = new int[]{2, 4, 8};
     public static final int[] HOST_RAM = new int[]{65536, 65536, 65536};
 
     public Constants() {
     }
+
+    public static final int DC_NUM = 10;
 
     public static final int CREATE_VM = 10;
 
@@ -50,7 +52,7 @@ public class Constants {
     public static final int CLOUDSIM_RESTART = 102;
 
 
-    public static final int Iteration = 1;
+    public static final int Iteration = 100;
 
     public static final int NUMBER_OF_HOSTS = 50;
 

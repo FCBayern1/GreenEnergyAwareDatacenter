@@ -12,6 +12,7 @@ import cloud.datacenter.PowerDatacenterRandom;
 import org.cloudbus.cloudsim.power.PowerHost;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
 
@@ -20,11 +21,23 @@ import static cloud.Constants.CREATE_VM_ACK;
 /**
  * @author ml969
  * @date 06/03/2025
- * @description A Q-Learning based DatacenterBroker to maximize green power consumption.
+ * @description A Q-Learning based DatacenterBroker to maximise green power consumption.
+ */
+
+/*
+vmList：存储待创建的虚拟机列表。
+vmsCreatedList：存储已创建的虚拟机列表。
+cloudletList：存储待提交的任务列表。
+cloudletSubmittedList：存储已提交的任务列表。
+cloudletReceivedList：存储已完成并返回的任务列表。
+datacenterIdsList：存储数据中心 ID 列表。
+datacenterRequestedIdsList：存储已请求过的资源的数据中心 ID。
+vmsToDatacentersMap：映射虚拟机 ID 到数据中心 ID。
+datacenterCharacteristicsList：存储数据中心的特性。
  */
 public class QLearningDatacenterBroker extends PowerDatacenterBroker {
 
-    private double[][] qTable; // Q 表: [Cloudlet ID][Datacenter ID]
+    private HashMap<String, double[]> qTable; // Q 表: [Cloudlet ID][Datacenter ID]
     private Random random;
     private double alpha = 0.1; // 学习率
     private double gamma = 0.9; // 折扣因子
@@ -34,6 +47,7 @@ public class QLearningDatacenterBroker extends PowerDatacenterBroker {
     public QLearningDatacenterBroker(String name) throws Exception {
         super(name);
         this.random = new Random();
+        this.qTable = new HashMap<>();
     }
 
     @Override
@@ -50,6 +64,7 @@ public class QLearningDatacenterBroker extends PowerDatacenterBroker {
         }
     }
 
+//    处理虚拟机创建的结果，从事件中提取dc id，vm id 和创建结果
     @Override
     protected void processVmCreate(SimEvent ev) {
         int[] data = (int[]) ev.getData();
@@ -77,7 +92,7 @@ public class QLearningDatacenterBroker extends PowerDatacenterBroker {
         if (getVmsCreatedList().size() == getVmList().size() && getVmsRequested() == getVmsAcks()) {
             submitCloudlets();
         } else if (getVmsRequested() == getVmsAcks() && getVmsCreatedList().size() < getVmList().size()) {
-            // 如果仍有 VM 未创建，尝试其他数据中心
+
             for (int nextDatacenterId : getDatacenterIdsList()) {
                 if (!getDatacenterRequestedIdsList().contains(nextDatacenterId)) {
                     createVmsInDatacenter(nextDatacenterId);
@@ -87,14 +102,18 @@ public class QLearningDatacenterBroker extends PowerDatacenterBroker {
         }
     }
 
+//    在指定的数据中心里创建虚拟机
     @Override
     protected void createVmsInDatacenter(int datacenterId) {
+        List<Integer> datacenterIds = getDatacenterIdsList();
         while (requestedVms < getVmList().size()) {
             Vm vm = getVmList().get(requestedVms);
             if (!getVmsToDatacentersMap().containsKey(vm.getId())) {
+                int selectedDatacenter = datacenterIds.get(requestedVms % datacenterIds.size());
+
                 Log.printLine(CloudSim.clock() + ": " + getName() + ": Trying to Create VM #" + vm.getId()
-                        + " in Datacenter #" + datacenterId);
-                sendNow(datacenterId, CREATE_VM_ACK, vm);
+                        + " in Datacenter #" + selectedDatacenter);
+                sendNow(selectedDatacenter, CREATE_VM_ACK, vm);
                 requestedVms++;
             }
             getDatacenterRequestedIdsList().add(datacenterId);
@@ -102,65 +121,78 @@ public class QLearningDatacenterBroker extends PowerDatacenterBroker {
         setVmsRequested(requestedVms);
         setVmsAcks(0);
     }
+
+    // 把一组cloudlets提交到cloudletList里面, 方便后续把他们分配给虚拟机
     @Override
     protected void submitCloudlets() {
         if (qTable == null) {
-            int cloudletCount = getCloudletList().size();
-            int datacenterCount = getDatacenterIdsList().size();
-            if (cloudletCount > 0 && datacenterCount > 0) {
-                qTable = new double[cloudletCount][datacenterCount];
-                Log.printLine(CloudSim.clock() + ": " + getName() + ": Initialized Q-Table with "
-                        + cloudletCount + " Cloudlets and " + datacenterCount + " Datacenters.");
-            } else {
-                Log.printLine(CloudSim.clock() + ": " + getName() + ": Error - Cloudlet or Datacenter list is empty.");
-                return;
-            }
+            qTable = new HashMap<>();
         }
 
-        List<Cloudlet> successfullySubmitted = new ArrayList<>();
-        int vmIndex = 0;
+        List<Cloudlet> cloudletList = getCloudletList();
+        if (cloudletList.isEmpty()) {
+            Log.printLine(CloudSim.clock() + ": " + getName() + ": No Cloudlets to submit.");
+            return;
+        }
 
-        for (Cloudlet cloudlet : getCloudletList()) {
-            Vm vm = getVmsCreatedList().get(vmIndex);
-            int state = cloudlet.getCloudletId() % qTable.length; // 简单状态：Cloudlet ID
-            int actionIndex = selectAction(state); // 数据中心索引
+        for (Cloudlet cloudlet : cloudletList) {
+            // **Q-learning 选择最优 Datacenter**
+            String state = getStateString();
+            int actionIndex = selectAction(state);
             int datacenterId = getDatacenterIdsList().get(actionIndex);
 
-            // 绑定 Cloudlet 到 VM
-            cloudlet.setVmId(vm.getId());
-            getVmsToDatacentersMap().put(vm.getId(), datacenterId);
-
-            // 提交 Cloudlet
-            sendNow(datacenterId, CloudSimTags.CLOUDLET_SUBMIT, cloudlet);
-            Log.printConcatLine(CloudSim.clock(), ": ", getName(), ": Sending cloudlet #",
-                    cloudlet.getCloudletId(), " to VM #", vm.getId(), " in Datacenter #", datacenterId);
-
-            // 获取奖励并更新 Q 表
-            double reward = getGreenPowerConsumption(datacenterId, cloudlet);
-            updateQTable(state, actionIndex, reward, datacenterId);
-
-            cloudletsSubmitted++;
-            vmIndex = (vmIndex + 1) % getVmsCreatedList().size();
-            getCloudletSubmittedList().add(cloudlet);
-            successfullySubmitted.add(cloudlet);
-        }
-        getCloudletList().removeAll(successfullySubmitted);
-    }
-
-    // ε-贪婪策略选择动作
-    private int selectAction(int state) {
-        if (random.nextDouble() < epsilon) {
-            return random.nextInt(getDatacenterIdsList().size());
-        } else {
-            int bestAction = 0;
-            double maxQ = qTable[state][0];
-            for (int i = 1; i < getDatacenterIdsList().size(); i++) {
-                if (qTable[state][i] > maxQ) {
-                    maxQ = qTable[state][i];
-                    bestAction = i;
+            // **找到该 Datacenter 里的 VM**
+            Vm selectedVm = null;
+            for (Vm vm : getVmsCreatedList()) {
+                if (getVmsToDatacentersMap().get(vm.getId()) == datacenterId) {
+                    selectedVm = vm;
+                    break;
                 }
             }
-            return bestAction;
+
+            // **如果该 Datacenter 里没有 VM，选择默认 VM**
+            if (selectedVm == null) {
+                selectedVm = getVmsCreatedList().get(0); // 选第一个 VM，防止出错
+                Log.printLine("⚠️ No VM found in Datacenter #" + datacenterId + ", using VM #" + selectedVm.getId());
+            }
+
+            // **绑定 Cloudlet 到这个 VM**
+            cloudlet.setVmId(selectedVm.getId());
+            sendNow(datacenterId, CloudSimTags.CLOUDLET_SUBMIT, cloudlet);
+            Log.printLine(CloudSim.clock() + ": " + getName() + ": Sending Cloudlet #"
+                    + cloudlet.getCloudletId() + " to VM #" + selectedVm.getId() + " in Datacenter #" + datacenterId);
+
+            // **更新 Q-learning**
+            double reward = getGreenPowerConsumption(datacenterId, cloudlet);
+            String newState = getStateString();
+            updateQTable(state, actionIndex, reward, newState);
+
+            decayEpsilon();
+            cloudletsSubmitted++;
+            getCloudletSubmittedList().add(cloudlet);
+        }
+
+        getCloudletList().clear();
+    }
+
+
+
+    // ε-greedy action selection
+    private int selectAction(String state) {
+        if (!qTable.containsKey(state)) {
+            qTable.put(state, new double[getDatacenterIdsList().size()]);
+        }
+
+        double[] qValues = qTable.get(state);
+
+        if (random.nextDouble() < epsilon) {
+            return random.nextInt(qValues.length);
+        } else {
+            int bestIndex = argMax(qValues);
+            if (qValues[bestIndex] == 0) {
+                return random.nextInt(qValues.length);
+            }
+            return bestIndex;
         }
     }
 
@@ -182,49 +214,68 @@ public class QLearningDatacenterBroker extends PowerDatacenterBroker {
             return 0.0;
         }
 
-        double mips = vm.getMips() * vm.getNumberOfPes();           // VM 的总计算能力
-        double cloudletLength = cloudlet.getCloudletLength();       // Cloudlet 的计算需求 (MI)
-        double executionTime = cloudletLength / mips;               // 执行时间（秒）
-        double hostTotalMips = host.getTotalMips();                 // Host 的总 MIPS
+        double mips = vm.getMips() * vm.getNumberOfPes();
+        double cloudletLength = cloudlet.getCloudletLength();
+        double executionTime = cloudletLength / mips;
+        double utilization = Math.min(1.0, Math.max(0.0, mips / host.getTotalMips()));
 
-        // 计算利用率，确保不超过 Host 容量，限制在 [0, 1]
-        double requestedMips = Math.min(mips, cloudlet.getNumberOfPes() * vm.getMips()); // Cloudlet 实际请求的 MIPS
-        double utilization = Math.min(1.0, Math.max(0.0, requestedMips / hostTotalMips));
-
-        // 获取功耗
-        double power;
-        try {
-            power = host.getPowerModel().getPower(utilization);     // 每秒功耗 (W)
-        } catch (IllegalArgumentException e) {
-            // 异常保护：如果利用率仍非法，强制调整为边界值
-            power = utilization < 0 ? host.getPowerModel().getPower(0.0) : host.getPowerModel().getPower(1.0);
-            Log.printLine(CloudSim.clock() + ": " + getName() + ": Warning - Adjusted utilization for Cloudlet #" +
-                    cloudlet.getCloudletId() + " from " + utilization + " to " + (utilization < 0 ? 0.0 : 1.0));
-        }
-
-        double energyConsumed = power * executionTime;              // 总能源需求 (W·s 或 J)
-        double availableGreenPower = datacenter.getGreenPower();    // 可用绿色能源 (W)
-        double greenPowerConsumed = Math.min(energyConsumed, availableGreenPower); // 绿色能源消耗
-
-        Log.printConcatLine(CloudSim.clock(), ": ", getName(), ": Cloudlet #", cloudlet.getCloudletId(),
-                " estimated green power consumption in Datacenter #", datacenterId, ": ", greenPowerConsumed, " W",
-                " (Utilization: ", utilization, ", Execution Time: ", executionTime, " s)");
+        double power = host.getPowerModel().getPower(utilization);
+        double energyConsumed = power * executionTime;
+        double availableGreenPower = datacenter.getGreenPower();
+        double greenPowerConsumed = Math.min(energyConsumed, availableGreenPower);
 
         return greenPowerConsumed;
     }
 
-    private void updateQTable(int state, int action, double reward, int datacenterId) {
-        int nextState = state;
 
-        double maxNextQ = 0;
-        for (int i = 0; i < getDatacenterIdsList().size(); i++) {
-            maxNextQ = Math.max(maxNextQ, qTable[nextState][i]);
+    private void updateQTable(String state, int action, double reward, String newState) {
+        if (!qTable.containsKey(newState)) {
+            qTable.put(newState, new double[getDatacenterIdsList().size()]);
         }
 
-        qTable[state][action] += alpha * (reward + gamma * maxNextQ - qTable[state][action]);
+        double[] qValues = qTable.get(state);
+        double[] newQValues = qTable.get(newState);
 
-        // 可选：记录更新日志
+        double maxNextQ = max(newQValues);
+        qValues[action] += alpha * (reward + gamma * maxNextQ - qValues[action]);
+
         Log.printConcatLine(CloudSim.clock(), ": ", getName(), ": Updated Q(s=", state, ", a=", action,
-                ") = ", qTable[state][action], " with reward=", reward);
+                ") = ", qValues[action], " with reward=", reward);
+    }
+
+    private String getStateString() {
+        StringBuilder state = new StringBuilder();
+        for (Integer dcId : getDatacenterIdsList()) {
+            PowerDatacenterRandom dc = (PowerDatacenterRandom) CloudSim.getEntity(dcId);
+            state.append(dc.getGreenPower()).append("_");
+        }
+        return state.toString();
+    }
+
+
+    private void decayEpsilon() {
+        if (epsilon > 0.01) {
+            epsilon *= 0.995; // 逐渐降低探索率
+        }
+    }
+
+    private int argMax(double[] values) {
+        int bestIndex = 0;
+        for (int i = 1; i < values.length; i++) {
+            if (values[i] > values[bestIndex]) {
+                bestIndex = i;
+            }
+        }
+        return bestIndex;
+    }
+
+    private double max(double[] values) {
+        double maxValue = Double.NEGATIVE_INFINITY;
+        for (double value : values) {
+            if (value > maxValue) {
+                maxValue = value;
+            }
+        }
+        return maxValue;
     }
 }

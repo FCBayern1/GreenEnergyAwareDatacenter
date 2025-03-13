@@ -1,7 +1,5 @@
 package cloud.Test;
-import java.util.List;
-import static cloud.Constants.Iteration;
-    import cloud.ExecuteData.Cross_Datacenter_Test;
+import cloud.ExecuteData.Test_RandomDC_QlearningBroker;
 
 
 /**
@@ -11,10 +9,8 @@ import static cloud.Constants.Iteration;
  */
 public class Test_CrossDC {
     public static void main(String[] args) throws Exception {
-        Cross_Datacenter_Test test = new Cross_Datacenter_Test();
+        Test_RandomDC_QlearningBroker test = new Test_RandomDC_QlearningBroker();
         Double maxGreenEnergyConsumption = test.execute();
-        System.out.println("Max Green Energy Consumption: "+ maxGreenEnergyConsumption);
-
 
     }
 

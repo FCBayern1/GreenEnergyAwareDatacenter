@@ -3,6 +3,7 @@ package cloud.ExecuteData;
 
 import cloud.GenExcel;
 import cloud.NewPowerAllocatePolicy;
+import cloud.NewPowerDatacenterBroker;
 import cloud.brokers.RandomDatacenterBroker;
 import cloud.datacenter.PowerDatacenterRandom;
 import cloud.policy.VmAllocationAssignerRandom;
@@ -128,8 +129,7 @@ public class Test_RandomDC_RandomBroker {
                 costPerMem,
                 costPerStorage,
                 costPerBw);
-        PowerDatacenterRandom datacenter = new PowerDatacenterRandom("test", characteristics, vmAllocationPolicy, new LinkedList<Storage>(), 300, vmAllocationAssignerRandom, greenpower);
-        return datacenter;
+        return new PowerDatacenterRandom("test", characteristics, vmAllocationPolicy, new LinkedList<Storage>(), 300, vmAllocationAssignerRandom, greenpower);
     }
 
     public DatacenterBroker createBroker() {

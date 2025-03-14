@@ -1,7 +1,6 @@
 package cloud.brokers;
 
 import org.cloudbus.cloudsim.Cloudlet;
-import org.cloudbus.cloudsim.DatacenterBroker;
 import org.cloudbus.cloudsim.Log;
 import org.cloudbus.cloudsim.Vm;
 import org.cloudbus.cloudsim.core.CloudSim;
@@ -9,31 +8,26 @@ import org.cloudbus.cloudsim.core.CloudSimTags;
 import org.cloudbus.cloudsim.core.SimEvent;
 import org.cloudbus.cloudsim.lists.VmList;
 import org.cloudbus.cloudsim.power.PowerDatacenterBroker;
-import java.util.Random;
+import cloud.datacenter.PowerDatacenterRandom;
+import org.cloudbus.cloudsim.power.PowerHost;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Random;
 
-import static cloud.Constants.CLOUDSIM_RESTART;
 import static cloud.Constants.CREATE_VM_ACK;
 
-
 /**
- * @author ml969$
- * @date 04/03/2025$
- * @description TODO
+ * @author ml969
+ * @date 06/03/2025
+ * @description A Random-strategy based DatacenterBroker to assign cloudlets randomly to datacenters.
  */
 public class RandomDatacenterBroker extends PowerDatacenterBroker {
 
-    int requestedVms = 0;
     private Random random;
+    private int requestedVms = 0;
 
-    /**
-     * Instantiates a new PowerDatacenterBroker.
-     *
-     * @param name the name of the broker
-     * @throws Exception the exception
-     */
     public RandomDatacenterBroker(String name) throws Exception {
         super(name);
         this.random = new Random();
@@ -45,12 +39,9 @@ public class RandomDatacenterBroker extends PowerDatacenterBroker {
             case CREATE_VM_ACK:
                 processVmCreate(ev);
                 break;
-            case CLOUDSIM_RESTART:
-                startEntity();
-                break;
             default:
                 if (ev == null) {
-                    Log.printConcatLine(getName(), ".processOtherEvent(): Error - an event is null in DatacenterBroker.");
+                    Log.printConcatLine(getName(), ".processOtherEvent(): Error - an event is null.");
                 }
                 break;
         }
@@ -62,43 +53,30 @@ public class RandomDatacenterBroker extends PowerDatacenterBroker {
         int datacenterId = data[0];
         int vmId = data[1];
         int result = data[2];
-        int randomDatacenterId = selectRandomDatacenter();
         if (result == CloudSimTags.TRUE) {
-            getVmsToDatacentersMap().put(vmId, randomDatacenterId);
+            getVmsToDatacentersMap().put(vmId, datacenterId);
             getVmsCreatedList().add(VmList.getById(getVmList(), vmId));
             Log.printConcatLine(CloudSim.clock(), ": ", getName(), ": VM #", vmId,
-                    " has been randomly created in Datacenter #", randomDatacenterId, ", Host #",
-                    VmList.getById(getVmsCreatedList(), vmId).getHost().getId());
+                    " has been created in Datacenter #", datacenterId);
         } else {
             Log.printConcatLine(CloudSim.clock(), ": ", getName(), ": Creation of VM #", vmId,
-                    " failed in Datacenter #", randomDatacenterId);
+                    " failed in Datacenter #", datacenterId);
+            for (int nextDatacenterId : getDatacenterIdsList()) {
+                if (nextDatacenterId != datacenterId && !getDatacenterRequestedIdsList().contains(nextDatacenterId)) {
+                    createVmsInDatacenter(nextDatacenterId);
+                    break;
+                }
+            }
         }
 
         incrementVmsAcks();
-        int createsize = getVmsCreatedList().size();
-        int vmsize = getVmList().size();
-        int destroysize = getVmsDestroyed();
-        // all the requested VMs have been created
-        if (getVmsCreatedList().size() > 0 && getVmsCreatedList().size() <= getVmList().size()) {
+        if (getVmsCreatedList().size() == getVmList().size() && getVmsRequested() == getVmsAcks()) {
             submitCloudlets();
-        } else {
-            // all the acks received, but some VMs were not created
-            if (getVmsRequested() == getVmsAcks()) {
-                // find id of the next datacenter that has not been tried
-                for (int nextDatacenterId : getDatacenterIdsList()) {
-                    if (!getDatacenterRequestedIdsList().contains(nextDatacenterId)) {
-                        createVmsInDatacenter(nextDatacenterId);
-                        return;
-                    }
-                }
-
-                // all datacenters already queried
-                if (getVmsCreatedList().size() > 0) { // if some vm were created
-                    submitCloudlets();
-                } else { // no vms created. abort
-                    Log.printLine(CloudSim.clock() + ": " + getName()
-                            + ": none of the required VMs could be created. Aborting");
-                    finishExecution();
+        } else if (getVmsRequested() == getVmsAcks() && getVmsCreatedList().size() < getVmList().size()) {
+            for (int nextDatacenterId : getDatacenterIdsList()) {
+                if (!getDatacenterRequestedIdsList().contains(nextDatacenterId)) {
+                    createVmsInDatacenter(nextDatacenterId);
+                    break;
                 }
             }
         }
@@ -106,68 +84,91 @@ public class RandomDatacenterBroker extends PowerDatacenterBroker {
 
     @Override
     protected void createVmsInDatacenter(int datacenterId) {
-        int randomDatacenterId = selectRandomDatacenter();
-        String datacenterName = CloudSim.getEntityName(randomDatacenterId);
+        List<Integer> datacenterIds = getDatacenterIdsList();
+        while (requestedVms < getVmList().size()) {
+            Vm vm = getVmList().get(requestedVms);
+            if (!getVmsToDatacentersMap().containsKey(vm.getId())) {
+                int selectedDatacenter = datacenterIds.get(requestedVms % datacenterIds.size());
 
-        Vm vm = getVmList().get(requestedVms);
-        if (!getVmsToDatacentersMap().containsKey(vm.getId()) && requestedVms < getVmList().size() - 1) {
-            Log.printLine(CloudSim.clock() + ": " + getName() + ": Trying to Create VM #" + vm.getId()
-                    + " randomly in " + datacenterName);
-            sendNow(randomDatacenterId, CREATE_VM_ACK, vm);
-            requestedVms++;
+                Log.printLine(CloudSim.clock() + ": " + getName() + ": Trying to Create VM #" + vm.getId()
+                        + " in Datacenter #" + selectedDatacenter);
+                sendNow(selectedDatacenter, CREATE_VM_ACK, vm);
+                requestedVms++;
+            }
+            getDatacenterRequestedIdsList().add(datacenterId);
         }
-        getDatacenterRequestedIdsList().add(randomDatacenterId);
-
         setVmsRequested(requestedVms);
         setVmsAcks(0);
     }
 
-
     @Override
     protected void submitCloudlets() {
-        int vmIndex = 0;
-        List<Cloudlet> successfullySubmitted = new ArrayList<Cloudlet>();
-        List<Vm> vms = getVmsCreatedList();
-        Cloudlet cloudlet = getCloudletList().get(0);
-        Vm vm;
-        // if user didn't bind this cloudlet and it has not been executed yet
-        if (cloudlet.getVmId() == -1) {
-            vm = getVmsCreatedList().get(vmIndex);
-        } else { // submit to the specific vm
-            vm = VmList.getById(getVmsCreatedList(), cloudlet.getVmId());
-            if (vm == null) { // vm was not created
-                if (!Log.isDisabled()) {
-                    Log.printConcatLine(CloudSim.clock(), ": ", getName(), ": Postponing execution of cloudlet ",
-                            cloudlet.getCloudletId(), ": Found VM not available");
+        List<Cloudlet> cloudletList = getCloudletList();
+        if (cloudletList.isEmpty()) {
+            Log.printLine(CloudSim.clock() + ": " + getName() + ": No Cloudlets to submit.");
+            return;
+        }
+
+        for (Cloudlet cloudlet : cloudletList) {
+            // 随机选择数据中心
+            int datacenterId = getDatacenterIdsList().get(random.nextInt(getDatacenterIdsList().size()));
+
+            // 找到该数据中心里的 VM
+            Vm selectedVm = null;
+            for (Vm vm : getVmsCreatedList()) {
+                if (getVmsToDatacentersMap().get(vm.getId()) == datacenterId) {
+                    selectedVm = vm;
+                    break;
                 }
             }
+
+            // 如果该数据中心里没有 VM，选择默认 VM
+            if (selectedVm == null) {
+                selectedVm = getVmsCreatedList().get(0); // 选第一个 VM，防止出错
+                Log.printLine("⚠️ No VM found in Datacenter #" + datacenterId + ", using VM #" + selectedVm.getId());
+            }
+
+            // 绑定 Cloudlet 到这个 VM
+            cloudlet.setVmId(selectedVm.getId());
+            sendNow(datacenterId, CloudSimTags.CLOUDLET_SUBMIT, cloudlet);
+            Log.printLine(CloudSim.clock() + ": " + getName() + ": Sending Cloudlet #"
+                    + cloudlet.getCloudletId() + " to VM #" + selectedVm.getId() + " in Datacenter #" + datacenterId);
+
+            cloudletsSubmitted++;
+            getCloudletSubmittedList().add(cloudlet);
         }
 
-        if (!Log.isDisabled()) {
-            Log.printConcatLine(CloudSim.clock(), ": ", getName(), ": Sending cloudlet ",
-                    cloudlet.getCloudletId(), " to VM #", vm.getId());
-        }
-
-        cloudlet.setVmId(vm.getId());
-        sendNow(getVmsToDatacentersMap().get(vm.getId()), CloudSimTags.CLOUDLET_SUBMIT, cloudlet);
-        cloudletsSubmitted++;
-        vmIndex = (vmIndex + 1) % getVmsCreatedList().size();
-        getCloudletSubmittedList().add(cloudlet);
-        successfullySubmitted.add(cloudlet);
-
-
-        // remove submitted cloudlets from waiting list
-        getCloudletList().removeAll(successfullySubmitted);
+        getCloudletList().clear();
     }
 
-    private int selectRandomDatacenter(){
-        int size = getDatacenterIdsList().size();
-        if(getDatacenterIdsList().isEmpty()){
-            return -1;
+    private double getGreenPowerConsumption(int datacenterId, Cloudlet cloudlet) {
+        PowerDatacenterRandom datacenter = (PowerDatacenterRandom) CloudSim.getEntity(datacenterId);
+        if (datacenter == null) {
+            Log.printLine(CloudSim.clock() + ": " + getName() + ": Error - Datacenter #" + datacenterId + " not found.");
+            return 0.0;
         }
-        int index = random.nextInt(size);
-        return getDatacenterIdsList().get(index);
-    }
 
+        Vm vm = VmList.getById(getVmsCreatedList(), cloudlet.getVmId());
+        if (vm == null) {
+            Log.printLine(CloudSim.clock() + ": " + getName() + ": Error - VM not found for Cloudlet #" + cloudlet.getCloudletId());
+            return 0.0;
+        }
+        PowerHost host = (PowerHost) vm.getHost();
+        if (host == null) {
+            Log.printLine(CloudSim.clock() + ": " + getName() + ": Error - Host not found for VM #" + vm.getId());
+            return 0.0;
+        }
+
+        double mips = vm.getMips() * vm.getNumberOfPes();
+        double cloudletLength = cloudlet.getCloudletLength();
+        double executionTime = cloudletLength / mips;
+        double utilization = Math.min(1.0, Math.max(0.0, mips / host.getTotalMips()));
+
+        double power = host.getPowerModel().getPower(utilization);
+        double energyConsumed = power * executionTime;
+        double availableGreenPower = datacenter.getGreenPower();
+        double greenPowerConsumed = Math.min(energyConsumed, availableGreenPower);
+
+        return greenPowerConsumed;
+    }
 }
-

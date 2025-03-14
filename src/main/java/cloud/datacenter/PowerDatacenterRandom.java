@@ -294,6 +294,7 @@ public class PowerDatacenterRandom extends PowerDatacenter {
     public double getPower() {
         return power;
     }
+
     protected void setPower(double power) {
         this.power = power;
     }

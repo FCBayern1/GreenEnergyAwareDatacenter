@@ -41,7 +41,7 @@ public class QLearningDatacenterBroker extends PowerDatacenterBroker {
     private Random random;
     private double alpha = 0.1; // 学习率
     private double gamma = 0.9; // 折扣因子
-    private double epsilon = 0.1; // ε-贪婪策略的探索概率
+    private double epsilon = 0.3; // ε-贪婪策略的探索概率
     private int requestedVms = 0;
 
     public QLearningDatacenterBroker(String name) throws Exception {
@@ -254,8 +254,8 @@ public class QLearningDatacenterBroker extends PowerDatacenterBroker {
 
 
     private void decayEpsilon() {
-        if (epsilon > 0.01) {
-            epsilon *= 0.995; // 逐渐降低探索率
+        if (epsilon > 0.05) {
+            epsilon *= 0.999; // 逐渐降低探索率
         }
     }
 
